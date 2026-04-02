@@ -15,9 +15,9 @@ class TeamStanding(BaseModel):
     ties: int = 0
     points_for: float = 0.0
     points_against: float = 0.0
+    division: int | None = None
     # Simulation results
     playoff_odds: float = 0.0
-    first_seed_odds: float = 0.0
     bye_odds: float = 0.0
 
 
@@ -38,9 +38,11 @@ class LeagueInfo(BaseModel):
     total_teams: int
     playoff_week_start: int
     num_playoff_teams: int
+    num_bye_teams: int = 0
     current_week: int
     league_average_match: bool = False
-    divisions: dict[str, str] | None = None  # roster_id -> division name
+    season_complete: bool = False
+    divisions: dict[int, int] | None = None  # roster_id -> division number
 
 
 class LeagueResponse(BaseModel):
@@ -55,9 +57,31 @@ class LockedMatchup(BaseModel):
     winner_roster_id: int
 
 
+class LockedMedian(BaseModel):
+    week: int
+    roster_id: int
+    above_median: bool
+
+
 class ScenarioRequest(BaseModel):
     locked_matchups: list[LockedMatchup] = []
+    locked_medians: list[LockedMedian] = []
 
 
 class ScenarioResponse(BaseModel):
     standings: list[TeamStanding]
+
+
+class DraftPick(BaseModel):
+    round: int
+    pick: int  # pick within round
+    overall: int  # overall pick number
+    original_roster_id: int  # roster that generated the pick (by standing)
+    owner_roster_id: int  # who currently owns the pick
+    owner_name: str = "Unknown"
+    original_name: str = "Unknown"
+
+
+class DraftOrderResponse(BaseModel):
+    season: str
+    picks: list[DraftPick]

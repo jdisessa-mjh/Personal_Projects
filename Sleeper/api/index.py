@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import sleeper_client as sc
 from .models import (
+    DraftOrderResponse,
+    DraftPick,
     LeagueInfo,
     LeagueResponse,
     Matchup,
@@ -24,7 +26,7 @@ app = FastAPI(title="Sleeper Playoff Predictor")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://*.vercel.app"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "https://*.vercel.app"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -50,13 +52,36 @@ async def _fetch_league_data(league_id: str):
     current_week = nfl_state.get("week", 1)
     league_season = league_raw.get("season")
 
-    # Only use NFL state week if this league is for the current NFL season
+    # Detect offseason: different season, or NFL state says "off"/"pre" with week 0
     nfl_season = str(nfl_state.get("season", ""))
+    season_type = nfl_state.get("season_type", "")
     if str(league_season) != nfl_season:
-        # Off-season or different season: treat all weeks as completed
         current_week = playoff_week_start
+    elif season_type == "off" or (season_type == "pre" and current_week == 0):
+        current_week = 0
 
     league_average_match = bool(settings.get("league_average_match", 0))
+
+    # Build division mapping: roster_id -> division number
+    num_divisions = settings.get("divisions", 0)
+    divisions: dict[int, int] | None = None
+    if num_divisions and num_divisions > 0:
+        divisions = {}
+        for roster in rosters_raw:
+            rid = roster["roster_id"]
+            div = (roster.get("settings") or {}).get("division", 1)
+            divisions[rid] = div
+
+    effective_week = min(current_week, playoff_week_start)
+    # Season is complete if we're past regular season, or it's the offseason
+    season_complete = (
+        effective_week >= playoff_week_start
+        or season_type == "off"
+        or (str(league_season) != nfl_season)
+    )
+
+    # Calculate bye teams
+    num_bye = 2 if num_playoff_teams == 6 else 0
 
     league_info = LeagueInfo(
         league_id=league_id,
@@ -65,8 +90,11 @@ async def _fetch_league_data(league_id: str):
         total_teams=total_teams,
         playoff_week_start=playoff_week_start,
         num_playoff_teams=num_playoff_teams,
-        current_week=min(current_week, playoff_week_start),
+        num_bye_teams=num_bye,
+        current_week=effective_week,
         league_average_match=league_average_match,
+        season_complete=season_complete,
+        divisions=divisions,
     )
 
     return league_info, league_raw, rosters_raw, users_raw, nfl_state
@@ -130,19 +158,17 @@ async def get_league(league_id: str):
         league_id, league_info.playoff_week_start, league_info.current_week
     )
 
-    standings = build_standings(rosters_raw, users_raw, all_matchups)
+    standings = build_standings(rosters_raw, users_raw, all_matchups, league_info.divisions)
     remaining = get_remaining_matchups(all_matchups, league_info.current_week)
-
-    # Calculate bye teams: if 6+ playoff teams, top 2 get bye; if 8, top 0; if 4, top 0
-    num_bye = 2 if league_info.num_playoff_teams == 6 else 0
 
     standings = run_simulation(
         standings=standings,
         remaining_matchups=remaining,
         locked_matchups=[],
         num_playoff_teams=league_info.num_playoff_teams,
-        num_bye_teams=num_bye,
+        num_bye_teams=league_info.num_bye_teams,
         league_average_match=league_info.league_average_match,
+        divisions=league_info.divisions,
     )
 
     return LeagueResponse(
@@ -161,19 +187,19 @@ async def run_scenario(league_id: str, request: ScenarioRequest):
         league_id, league_info.playoff_week_start, league_info.current_week
     )
 
-    standings = build_standings(rosters_raw, users_raw, all_matchups)
+    standings = build_standings(rosters_raw, users_raw, all_matchups, league_info.divisions)
     remaining = get_remaining_matchups(all_matchups, league_info.current_week)
     valid_locked = validate_locked_matchups(request.locked_matchups, remaining)
-
-    num_bye = 2 if league_info.num_playoff_teams == 6 else 0
 
     standings = run_simulation(
         standings=standings,
         remaining_matchups=remaining,
         locked_matchups=valid_locked,
         num_playoff_teams=league_info.num_playoff_teams,
-        num_bye_teams=num_bye,
+        num_bye_teams=league_info.num_bye_teams,
         league_average_match=league_info.league_average_match,
+        divisions=league_info.divisions,
+        locked_medians=request.locked_medians,
     )
 
     return ScenarioResponse(standings=standings)
@@ -186,3 +212,72 @@ async def get_matchups(league_id: str):
     return await _fetch_all_matchups(
         league_id, league_info.playoff_week_start, league_info.current_week
     )
+
+
+@app.get("/api/league/{league_id}/draft-order", response_model=DraftOrderResponse)
+async def get_draft_order(league_id: str):
+    """Get projected rookie draft order based on standings and traded picks."""
+    league_info, league_raw, rosters_raw, users_raw, nfl_state = await _fetch_league_data(league_id)
+
+    all_matchups = await _fetch_all_matchups(
+        league_id, league_info.playoff_week_start, league_info.current_week
+    )
+    standings = build_standings(rosters_raw, users_raw, all_matchups, league_info.divisions)
+    remaining = get_remaining_matchups(all_matchups, league_info.current_week)
+    standings = run_simulation(
+        standings=standings,
+        remaining_matchups=remaining,
+        locked_matchups=[],
+        num_playoff_teams=league_info.num_playoff_teams,
+        num_bye_teams=league_info.num_bye_teams,
+        league_average_match=league_info.league_average_match,
+        divisions=league_info.divisions,
+    )
+
+    traded_picks_raw = await sc.get_traded_picks(league_id)
+
+    # Build name lookup
+    name_map: dict[int, str] = {}
+    for t in standings:
+        name_map[t.roster_id] = t.display_name
+
+    # Draft order: non-playoff teams reversed, then playoff teams reversed
+    num_playoff = league_info.num_playoff_teams
+    non_playoff = list(reversed(standings[num_playoff:]))
+    playoff = list(reversed(standings[:num_playoff]))
+    base_order = non_playoff + playoff
+
+    # Determine the draft season (next season after current)
+    draft_season = str(int(league_info.season) + 1)
+
+    # Build traded picks lookup: (season, round, original_roster_id) -> new_owner_roster_id
+    traded_map: dict[tuple[str, int, int], int] = {}
+    for tp in traded_picks_raw:
+        key = (str(tp.get("season", "")), tp.get("round", 0), tp.get("roster_id", 0))
+        traded_map[key] = tp.get("owner_id", tp.get("roster_id", 0))
+
+    # Determine number of rounds (Sleeper default is typically 3-5 for rookie drafts)
+    settings = league_raw.get("settings", {})
+    num_rounds = settings.get("draft_rounds", 3)
+
+    picks: list[DraftPick] = []
+    overall = 1
+    for rd in range(1, num_rounds + 1):
+        for pick_in_round, team in enumerate(base_order, 1):
+            original_rid = team.roster_id
+            # Check if this pick was traded
+            trade_key = (draft_season, rd, original_rid)
+            owner_rid = traded_map.get(trade_key, original_rid)
+
+            picks.append(DraftPick(
+                round=rd,
+                pick=pick_in_round,
+                overall=overall,
+                original_roster_id=original_rid,
+                owner_roster_id=owner_rid,
+                owner_name=name_map.get(owner_rid, "Unknown"),
+                original_name=name_map.get(original_rid, "Unknown"),
+            ))
+            overall += 1
+
+    return DraftOrderResponse(season=draft_season, picks=picks)

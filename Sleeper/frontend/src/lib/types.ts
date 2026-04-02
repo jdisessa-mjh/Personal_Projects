@@ -8,8 +8,8 @@ export interface TeamStanding {
   ties: number;
   points_for: number;
   points_against: number;
+  division: number | null;
   playoff_odds: number;
-  first_seed_odds: number;
   bye_odds: number;
 }
 
@@ -30,8 +30,11 @@ export interface LeagueInfo {
   total_teams: number;
   playoff_week_start: number;
   num_playoff_teams: number;
+  num_bye_teams: number;
   current_week: number;
   league_average_match: boolean;
+  season_complete: boolean;
+  divisions: Record<string, number> | null;
 }
 
 export interface LeagueResponse {
@@ -46,8 +49,35 @@ export interface LockedMatchup {
   winner_roster_id: number;
 }
 
+export interface LockedMedian {
+  week: number;
+  roster_id: number;
+  above_median: boolean;
+}
+
 export interface ScenarioResponse {
   standings: TeamStanding[];
 }
 
-export type ToggleState = "unset" | number; // "unset" or winner's roster_id
+export interface DraftPick {
+  round: number;
+  pick: number;
+  overall: number;
+  original_roster_id: number;
+  owner_roster_id: number;
+  owner_name: string;
+  original_name: string;
+}
+
+export interface DraftOrderResponse {
+  season: string;
+  picks: DraftPick[];
+}
+
+export interface SavedLeague {
+  leagueId: string;
+  name: string;
+  season: string;
+  totalTeams: number;
+  lastViewed: number;
+}

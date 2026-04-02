@@ -1,52 +1,66 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
-export default function LeagueInput() {
-  const [leagueId, setLeagueId] = useState("");
+function extractLeagueId(input: string): string {
+  const trimmed = input.trim();
+  // Handle Sleeper URLs like https://sleeper.com/leagues/123456789
+  const urlMatch = trimmed.match(/sleeper\.com\/leagues\/(\d+)/);
+  if (urlMatch) return urlMatch[1];
+  return trimmed;
+}
+
+export default function LeagueInput({
+  onSubmit,
+  placeholder = "Enter Sleeper League ID or paste URL",
+  buttonText = "View Playoff Odds",
+}: {
+  onSubmit: (leagueId: string) => void;
+  placeholder?: string;
+  buttonText?: string;
+}) {
+  const [input, setInput] = useState("");
   const [error, setError] = useState("");
-  const router = useRouter();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = leagueId.trim();
-    if (!trimmed) {
+    const leagueId = extractLeagueId(input);
+    if (!leagueId) {
       setError("Please enter a league ID");
       return;
     }
-    if (!/^\d+$/.test(trimmed)) {
+    if (!/^\d+$/.test(leagueId)) {
       setError("League ID should be a number");
       return;
     }
-    router.push(`/league/${trimmed}`);
+    onSubmit(leagueId);
+    setInput("");
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="flex gap-2">
       <input
         type="text"
-        value={leagueId}
+        value={input}
         onChange={(e) => {
-          setLeagueId(e.target.value);
+          setInput(e.target.value);
           setError("");
         }}
-        placeholder="Enter Sleeper League ID"
-        className="w-full px-4 py-3 rounded-lg bg-sleeper-surface border border-sleeper-muted/30
-                   text-white placeholder-sleeper-muted focus:outline-none focus:border-sleeper-accent
-                   text-center text-lg"
+        placeholder={placeholder}
+        className="flex-1 px-4 py-2.5 rounded-lg bg-white border border-gray-300
+                   text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2
+                   focus:ring-brand/40 focus:border-brand text-sm"
       />
-      {error && <p className="text-red-400 text-sm">{error}</p>}
       <button
         type="submit"
-        className="w-full py-3 rounded-lg bg-sleeper-accent hover:bg-sleeper-accent-light
-                   font-semibold transition-colors text-sleeper-darker"
+        className="px-5 py-2.5 rounded-lg bg-brand hover:bg-brand-dark
+                   text-white font-medium transition-colors text-sm whitespace-nowrap"
       >
-        View Playoff Odds
+        {buttonText}
       </button>
-      <p className="text-sleeper-muted text-xs">
-        Find your league ID in the Sleeper app under League Settings, or from the URL on the web.
-      </p>
+      {error && (
+        <p className="absolute mt-12 text-red-500 text-xs">{error}</p>
+      )}
     </form>
   );
 }

@@ -42,3 +42,9 @@ async def get_matchups(league_id: str, week: int) -> list[dict]:
     r = await _get_client().get(f"/league/{league_id}/matchups/{week}")
     r.raise_for_status()
     return r.json()
+
+
+async def get_traded_picks(league_id: str) -> list[dict]:
+    r = await _get_client().get(f"/league/{league_id}/traded_picks")
+    r.raise_for_status()
+    return r.json()

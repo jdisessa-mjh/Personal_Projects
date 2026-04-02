@@ -9,6 +9,7 @@ def build_standings(
     rosters: list[dict],
     users: list[dict],
     completed_matchups: list[Matchup],
+    divisions: dict[int, int] | None = None,
 ) -> list[TeamStanding]:
     """Build standings from roster data and completed matchups."""
     user_map = {u["user_id"]: u for u in users}
@@ -23,7 +24,10 @@ def build_standings(
         standings[rid] = TeamStanding(
             roster_id=rid,
             owner_id=owner_id,
-            display_name=user.get("display_name", user.get("username", "Unknown")),
+            display_name=(user.get("metadata") or {}).get("team_name")
+            or user.get("display_name")
+            or user.get("username")
+            or "Unknown",
             avatar=user.get("avatar"),
             wins=settings.get("wins", 0),
             losses=settings.get("losses", 0),
@@ -31,6 +35,7 @@ def build_standings(
             points_for=settings.get("fpts", 0) + settings.get("fpts_decimal", 0) / 100,
             points_against=settings.get("fpts_against", 0)
             + settings.get("fpts_against_decimal", 0) / 100,
+            division=divisions.get(rid) if divisions else None,
         )
 
     return sort_standings(list(standings.values()))

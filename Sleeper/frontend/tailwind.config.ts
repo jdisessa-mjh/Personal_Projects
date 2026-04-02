@@ -5,13 +5,12 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        sleeper: {
-          dark: "#1a1d2e",
-          darker: "#151728",
-          accent: "#01b0a8",
-          "accent-light": "#00d4c8",
-          surface: "#232640",
-          muted: "#8e92a4",
+        brand: {
+          DEFAULT: "#019a93",
+          light: "#01b0a8",
+          dark: "#017d77",
+          50: "#f0fdfc",
+          100: "#ccfbf1",
         },
       },
     },
